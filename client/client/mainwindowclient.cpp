@@ -39,6 +39,24 @@ void MainWindowClient::setMenuFile()
     connect(*act, &QAction::triggered, this, &MainWindowClient::networkSettings);
 }
 
+void MainWindowClient::setCentralWidget_()
+{
+    auto wgt = new QWidget(this);
+    auto layout = new QVBoxLayout();
+    wgt->setLayout(layout);
+    layout->addWidget(te);
+    auto hlayout = new QHBoxLayout();
+    layout->addLayout(hlayout);
+    le_message = new QLineEdit(wgt);
+    pbtn_send = new QPushButton(tr("Отправить"),wgt);
+    pbtn_send->setEnabled(false);
+    connect(pbtn_send,&QPushButton::clicked,this,&MainWindowClient::send);
+    hlayout->addWidget(le_message);
+    hlayout->addWidget(pbtn_send);
+
+    setCentralWidget(wgt);
+}
+
 void MainWindowClient::quit()
 {
     qApp->quit();
@@ -61,22 +79,47 @@ void MainWindowClient::loging(QString msg)
     te->append(msg);
 }
 
+void MainWindowClient::open_port(std::shared_ptr<Network> net_)
+{
+    net = net_;
+    connect(net.get(),&Network::recieve,this,&MainWindowClient::loging);
+    pbtn_send->setEnabled(true);
+}
+
+void MainWindowClient::close_port()
+{
+    pbtn_send->setEnabled(false);
+    disconnect(net.get(),&Network::recieve,this,&MainWindowClient::loging);
+    net = nullptr;
+}
+
+void MainWindowClient::send()
+{
+    net->send(le_message->text());
+    le_message->clear();
+}
+
 MainWindowClient::MainWindowClient(QWidget *parent)
     : QMainWindow(parent)
+    , te(new QTextEdit(this))
+    , networkSettingsWgt(new NetworkSettingsWidget(this))
+    , dockNetworkSettings(nullptr)
 {
     resize(300,500);
     setWindowTitle(tr("Клиент"));
     setMenuFile();
 
-    setCentralWidget(te);
+    setCentralWidget_();
 
     connect(networkSettingsWgt,&NetworkSettingsWidget::loging,this,&MainWindowClient::loging);
+    connect(networkSettingsWgt,&NetworkSettingsWidget::open_port,this,&MainWindowClient::open_port);
+    connect(networkSettingsWgt,&NetworkSettingsWidget::close_port,this,&MainWindowClient::close_port);
 }
 
 MainWindowClient::~MainWindowClient()
 {}
 
-void MainWindowServer::setDockNetworkSettings()
+void MainWindowClient::setDockNetworkSettings()
 {
     dockNetworkSettings = new QDockWidget(tr("Сетевые настройки"),this);
     dockNetworkSettings->installEventFilter(new DockWidgetEventFilter());
@@ -86,8 +129,6 @@ void MainWindowServer::setDockNetworkSettings()
 
 NetworkSettingsWidget::NetworkSettingsWidget(QWidget* parent)
     : QWidget(parent)
-    , udp(nullptr)
-    , tcp(nullptr)
 {
     auto layout = new QGridLayout();
     setLayout(layout);
@@ -126,14 +167,10 @@ NetworkSettingsWidget::NetworkSettingsWidget(QWidget* parent)
 void NetworkSettingsWidget::pbtn_activateListeningClicked()
 {
     if(rbtn_udp->isChecked()) {
-        udp = std::make_unique<QUdpSocket>();
-        if(!udp->bind(QHostAddress(le_ip->text()),le_port->text().toInt())) {
-            emit loging("The binding didn't executed.");
-            return;
-        }
+        emit open_port(std::make_shared<NetworkUDP>(
+                           QHostAddress(le_ip->text()),
+                           le_port->text().toUInt()));
         emit loging("The binding executed.");
-
-        connect(udp.get(),&QUdpSocket::readyRead,this,&NetworkSettingsWidget::slotReadData);
     }
     else if(rbtn_tcp->isChecked()) {
 
@@ -141,6 +178,8 @@ void NetworkSettingsWidget::pbtn_activateListeningClicked()
 
     rbtn_udp->setEnabled(false);
     rbtn_tcp->setEnabled(false);
+    le_ip->setEnabled(false);
+    le_port->setEnabled(false);
     pbtn_activateListening->setEnabled(false);
     pbtn_disactivateListening->setEnabled(true);
 }
@@ -148,9 +187,8 @@ void NetworkSettingsWidget::pbtn_activateListeningClicked()
 void NetworkSettingsWidget::pbtn_disactivateListeningClicked()
 {
     if(rbtn_udp->isChecked()) {
-        disconnect(udp.get(),&QUdpSocket::readyRead,this,&NetworkSettingsWidget::slotReadData);
-        udp = nullptr;
         emit loging("The binding is broken.");
+        emit close_port();
     }
     else if(rbtn_tcp->isChecked()) {
 
@@ -158,20 +196,10 @@ void NetworkSettingsWidget::pbtn_disactivateListeningClicked()
 
     rbtn_udp->setEnabled(true);
     rbtn_tcp->setEnabled(true);
+    le_ip->setEnabled(true);
+    le_port->setEnabled(true);
     pbtn_activateListening->setEnabled(true);
     pbtn_disactivateListening->setEnabled(false);
-}
-
-void NetworkSettingsWidget::slotReadData()
-{
-    while(udp->hasPendingDatagrams()) {
-        QNetworkDatagram datagrm = udp->receiveDatagram();
-        QString msg;
-        msg += "(" + datagrm.senderAddress().toString() + "/" + datagrm.senderPort() + ") ";
-        msg += QDateTime::currentDateTime().toString() + ": ";
-        msg += datagrm.data();
-        emit loging(msg);
-    }
 }
 
 bool DockWidgetEventFilter::eventFilter(QObject* object, QEvent* event)
@@ -185,4 +213,37 @@ bool DockWidgetEventFilter::eventFilter(QObject* object, QEvent* event)
         return true;
     }
     return false;
+}
+
+NetworkUDP::NetworkUDP(QHostAddress addr_serv, uint16_t port_serv)
+    : Network(SoketType::UDP)
+    , udp(new QUdpSocket())
+    , addr_server(addr_serv)
+    , port_server(port_serv)
+{
+    udp->bind(QHostAddress::AnyIPv4);
+    connect(udp.get(),&QUdpSocket::readyRead,this,&NetworkUDP::slotReadData);
+}
+
+NetworkUDP::~NetworkUDP()
+{
+    disconnect(udp.get(),&QUdpSocket::readyRead,this,&NetworkUDP::slotReadData);
+}
+
+void NetworkUDP::send(QString msg)
+{
+    udp->writeDatagram(msg.toUtf8(),addr_server,port_server);
+}
+
+void NetworkUDP::slotReadData()
+{
+    while(udp->hasPendingDatagrams()) {
+        QNetworkDatagram datagrm = udp->receiveDatagram();
+        QString msg;
+        msg += "(from " + datagrm.senderAddress().toString() + "/" +
+               QString::number(datagrm.senderPort()) + ") ";
+        msg += QDateTime::currentDateTime().toString("yyyy.MM.dd : hh.mm.ss") + ": ";
+        msg += datagrm.data();
+        emit recieve(msg);
+    }
 }

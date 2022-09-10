@@ -11,6 +11,45 @@
 
 #include <memory>
 
+class Network: public QObject
+{
+    Q_OBJECT
+
+public:
+    enum class SoketType
+    {
+        UDP,TCP
+    };
+
+public:
+    Network(SoketType socket):socket_t(socket){}
+    virtual ~Network(){}
+    virtual void send(QString msg) = 0;
+    SoketType getSoketType() const {return socket_t;}
+
+protected:
+    SoketType socket_t;
+
+signals:
+    void recieve(QString msg);
+};
+
+class NetworkUDP: public Network
+{
+    Q_OBJECT
+public:
+    NetworkUDP(QHostAddress addr_serv, uint16_t port_serv);
+    ~NetworkUDP() override;
+    void send(QString msg) override;
+private:
+    std::unique_ptr<QUdpSocket> udp;
+    QHostAddress addr_server;
+    uint16_t port_server;
+private slots:
+    void slotReadData();
+};
+
+
 class NetworkSettingsWidget: public QWidget
 {
     Q_OBJECT
@@ -19,9 +58,6 @@ public:
     explicit NetworkSettingsWidget(QWidget* parent = nullptr);
 
 private:
-    std::unique_ptr<QUdpSocket> udp;
-    std::unique_ptr<QTcpServer> tcp;
-
     QLineEdit* le_ip;
     QLineEdit* le_port;
 
@@ -35,10 +71,10 @@ public slots:
     void pbtn_activateListeningClicked();
     void pbtn_disactivateListeningClicked();
 
-    void slotReadData();
-
 signals:
     void loging(QString str);
+    void open_port(std::shared_ptr<Network> net);
+    void close_port();
 };
 
 
@@ -53,17 +89,27 @@ public:
 private:
     void setDockNetworkSettings();
     void setMenuFile();
+    void setCentralWidget_();
 
 private:
     QTextEdit* te;
     NetworkSettingsWidget* networkSettingsWgt;
     QDockWidget* dockNetworkSettings;
 
+    QLineEdit* le_message;
+    QPushButton* pbtn_send;
+
+    std::shared_ptr<Network> net;
+
 public slots:
     void quit();
     void networkSettings();
 
     void loging(QString msg);
+    void open_port(std::shared_ptr<Network> net_);
+    void close_port();
+
+    void send();
 };
 
 class DockWidgetEventFilter: public QObject

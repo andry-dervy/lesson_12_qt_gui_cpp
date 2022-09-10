@@ -144,6 +144,8 @@ void NetworkSettingsWidget::pbtn_activateListeningClicked()
 
     rbtn_udp->setEnabled(false);
     rbtn_tcp->setEnabled(false);
+    le_ip->setEnabled(false);
+    le_port->setEnabled(false);
     pbtn_activateListening->setEnabled(false);
     pbtn_disactivateListening->setEnabled(true);
 }
@@ -161,6 +163,8 @@ void NetworkSettingsWidget::pbtn_disactivateListeningClicked()
 
     rbtn_udp->setEnabled(true);
     rbtn_tcp->setEnabled(true);
+    le_ip->setEnabled(true);
+    le_port->setEnabled(true);
     pbtn_activateListening->setEnabled(true);
     pbtn_disactivateListening->setEnabled(false);
 }
@@ -170,10 +174,12 @@ void NetworkSettingsWidget::slotReadData()
     while(udp->hasPendingDatagrams()) {
         QNetworkDatagram datagrm = udp->receiveDatagram();
         QString msg;
-        msg += "(" + datagrm.senderAddress().toString() + "/" + datagrm.senderPort() + ") ";
-        msg += QDateTime::currentDateTime().toString() + ": ";
+        msg += "(from " + datagrm.senderAddress().toString() + "/" +
+               QString::number(datagrm.senderPort()) + ") ";
+        msg += QDateTime::currentDateTime().toString("yyyy.MM.dd : hh.mm.ss") + ": ";
         msg += datagrm.data();
         emit loging(msg);
+        udp->writeDatagram(datagrm.data(),datagrm.senderAddress(),datagrm.senderPort());
     }
 }
 
