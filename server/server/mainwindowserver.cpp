@@ -9,6 +9,7 @@
 #include <QMenuBar>
 #include <QNetworkDatagram>
 #include <QDateTime>
+#include <QAbstractSocket>
 
 #include "QApplication"
 #include "widgetsfactory.h"
@@ -126,6 +127,21 @@ NetworkSettingsWidget::NetworkSettingsWidget(QWidget* parent)
     layout->setRowStretch(4,1);
 }
 
+NetworkSettingsWidget::~NetworkSettingsWidget()
+{
+    tcpDisconnectSockets();
+}
+
+void NetworkSettingsWidget::tcpDisconnectSockets()
+{
+    for(auto it = tcpSockets.begin(); it != tcpSockets.end();++it) {
+        auto& sock = *it;
+        disconnect(sock.get(), &QTcpSocket::readyRead, this, &NetworkSettingsWidget::slotReadDataTCP);
+        disconnect(sock.get(), &QTcpSocket::disconnected, this, &NetworkSettingsWidget::slotClientTcpDisconnected);
+    }
+    tcpSockets.clear();
+}
+
 void NetworkSettingsWidget::pbtn_activateListeningClicked()
 {
     if(rbtn_udp->isChecked()) {
@@ -136,10 +152,17 @@ void NetworkSettingsWidget::pbtn_activateListeningClicked()
         }
         emit loging("The binding executed.");
 
-        connect(udp.get(),&QUdpSocket::readyRead,this,&NetworkSettingsWidget::slotReadData);
+        connect(udp.get(),&QUdpSocket::readyRead,this,&NetworkSettingsWidget::slotReadDataUDP);
     }
     else if(rbtn_tcp->isChecked()) {
+        tcp = std::make_unique<QTcpServer>();
+        if(!tcp->listen(QHostAddress(le_ip->text()),le_port->text().toInt())) {
+            emit loging("The listening didn't executed.");
+            return;
+        }
+        emit loging("The listening is executed.");
 
+        connect(tcp.get(),&QTcpServer::newConnection,this,&NetworkSettingsWidget::slotNewTcpConnection);
     }
 
     rbtn_udp->setEnabled(false);
@@ -153,12 +176,13 @@ void NetworkSettingsWidget::pbtn_activateListeningClicked()
 void NetworkSettingsWidget::pbtn_disactivateListeningClicked()
 {
     if(rbtn_udp->isChecked()) {
-        disconnect(udp.get(),&QUdpSocket::readyRead,this,&NetworkSettingsWidget::slotReadData);
+        disconnect(udp.get(),&QUdpSocket::readyRead,this,&NetworkSettingsWidget::slotReadDataUDP);
         udp = nullptr;
         emit loging("The binding is broken.");
     }
     else if(rbtn_tcp->isChecked()) {
-
+        tcpDisconnectSockets();
+        emit loging("The connection is broken.");
     }
 
     rbtn_udp->setEnabled(true);
@@ -169,7 +193,7 @@ void NetworkSettingsWidget::pbtn_disactivateListeningClicked()
     pbtn_disactivateListening->setEnabled(false);
 }
 
-void NetworkSettingsWidget::slotReadData()
+void NetworkSettingsWidget::slotReadDataUDP()
 {
     while(udp->hasPendingDatagrams()) {
         QNetworkDatagram datagrm = udp->receiveDatagram();
@@ -180,6 +204,55 @@ void NetworkSettingsWidget::slotReadData()
         msg += datagrm.data();
         emit loging(msg);
         udp->writeDatagram(datagrm.data(),datagrm.senderAddress(),datagrm.senderPort());
+    }
+}
+
+void NetworkSettingsWidget::slotNewTcpConnection()
+{
+    auto tcpSocket = tcp->nextPendingConnection();
+
+    if(tcpSockets.size() == MAX_SOCKETS) {
+        tcpSocket->disconnect();
+        return;
+    }
+
+    tcpSocket->write("I am server!");
+    connect(tcpSocket, &QTcpSocket::readyRead, this, &NetworkSettingsWidget::slotReadDataTCP);
+    connect(tcpSocket, &QTcpSocket::disconnected, this, &NetworkSettingsWidget::slotClientTcpDisconnected);
+    std::unique_ptr<QTcpSocket> socket{tcpSocket};
+    tcpSockets.insert(std::move(socket));
+}
+
+void NetworkSettingsWidget::slotReadDataTCP()
+{
+    qDebug() << "slotReadDataTCP: tcpSockets.size =" << tcpSockets.size();
+    for(const auto& sock: tcpSockets) {
+        qDebug() << "sock.bytesAvailable =" << sock->bytesAvailable();
+        while(sock->bytesAvailable() > 0) {
+            QByteArray array = sock->readAll();
+            QString msg;
+            msg += "(from " + sock->peerAddress().toString() + "/" +
+                   QString::number(sock->peerPort()) + ") ";
+            msg += QDateTime::currentDateTime().toString("yyyy.MM.dd : hh.mm.ss") + ": ";
+            msg += array;
+            emit loging(msg);
+
+            sock->write(array);
+        }
+    }
+}
+
+void NetworkSettingsWidget::slotClientTcpDisconnected()
+{
+    for(auto it = tcpSockets.begin(); it != tcpSockets.end();)
+    {
+        auto& sock = *it;
+        if(sock->state() == QAbstractSocket::UnconnectedState) {
+            disconnect(sock.get(), &QTcpSocket::readyRead, this, &NetworkSettingsWidget::slotReadDataTCP);
+            disconnect(sock.get(), &QTcpSocket::disconnected, this, &NetworkSettingsWidget::slotClientTcpDisconnected);
+            it = tcpSockets.erase(it);
+        }
+        else ++it;
     }
 }
 

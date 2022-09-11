@@ -7,9 +7,11 @@
 #include <QRadioButton>
 #include <QUdpSocket>
 #include <QTcpServer>
+#include <QTcpSocket>
 #include <QLineEdit>
 
 #include <memory>
+#include <set>
 
 class NetworkSettingsWidget: public QWidget
 {
@@ -17,6 +19,7 @@ class NetworkSettingsWidget: public QWidget
 
 public:
     explicit NetworkSettingsWidget(QWidget* parent = nullptr);
+    ~NetworkSettingsWidget() override;
 
 private:
     std::unique_ptr<QUdpSocket> udp;
@@ -31,11 +34,20 @@ private:
     QRadioButton* rbtn_udp;
     QRadioButton* rbtn_tcp;
 
+    const size_t MAX_SOCKETS = 10;
+    std::set<std::unique_ptr<QTcpSocket>> tcpSockets;
+    QTcpSocket* socket;
+    void tcpDisconnectSockets();
+
 public slots:
     void pbtn_activateListeningClicked();
     void pbtn_disactivateListeningClicked();
 
-    void slotReadData();
+    void slotReadDataUDP();
+    void slotNewTcpConnection();
+
+    void slotReadDataTCP();
+    void slotClientTcpDisconnected();
 
 signals:
     void loging(QString str);

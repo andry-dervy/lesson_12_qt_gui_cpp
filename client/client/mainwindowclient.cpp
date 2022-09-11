@@ -173,7 +173,10 @@ void NetworkSettingsWidget::pbtn_activateListeningClicked()
         emit loging("The binding executed.");
     }
     else if(rbtn_tcp->isChecked()) {
-
+        emit open_port(std::make_shared<NetworkTCP>(
+                           QHostAddress(le_ip->text()),
+                           le_port->text().toUInt()));
+        emit loging("The binding executed.");
     }
 
     rbtn_udp->setEnabled(false);
@@ -191,7 +194,8 @@ void NetworkSettingsWidget::pbtn_disactivateListeningClicked()
         emit close_port();
     }
     else if(rbtn_tcp->isChecked()) {
-
+        emit loging("The binding is broken.");
+        emit close_port();
     }
 
     rbtn_udp->setEnabled(true);
@@ -244,6 +248,47 @@ void NetworkUDP::slotReadData()
                QString::number(datagrm.senderPort()) + ") ";
         msg += QDateTime::currentDateTime().toString("yyyy.MM.dd : hh.mm.ss") + ": ";
         msg += datagrm.data();
+        emit recieve(msg);
+    }
+}
+
+NetworkTCP::NetworkTCP(QHostAddress addr_serv, uint16_t port_serv)
+    : Network(SoketType::TCP)
+    , tcp(new QTcpSocket())
+    , addr_server(addr_serv)
+    , port_server(port_serv)
+{
+    tcp->connectToHost(addr_server,port_server);
+    if(!tcp->waitForConnected()) {
+        qDebug() << "The connection is not established.";
+    }
+    connect(tcp.get(),&QTcpSocket::readyRead,this,&NetworkTCP::slotReadData);
+}
+
+NetworkTCP::~NetworkTCP()
+{
+    disconnect(tcp.get(),&QTcpSocket::readyRead,this,&NetworkTCP::slotReadData);
+}
+
+void NetworkTCP::send(QString msg)
+{
+    if(tcp->state() == QAbstractSocket::ConnectedState) {
+        tcp->write(msg.toUtf8());
+        qDebug() << msg;
+    }
+    else
+        qDebug() << "The connection is not established.";
+}
+
+void NetworkTCP::slotReadData()
+{
+    while(tcp->bytesAvailable()>0) {
+        QByteArray array = tcp->readAll();
+        QString msg;
+        msg += "(from " + tcp->peerAddress().toString() + "/" +
+               QString::number(tcp->peerPort()) + ") ";
+        msg += QDateTime::currentDateTime().toString("yyyy.MM.dd : hh.mm.ss") + ": ";
+        msg += array;
         emit recieve(msg);
     }
 }

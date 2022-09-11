@@ -6,7 +6,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QUdpSocket>
-#include <QTcpServer>
+#include <QTcpSocket>
 #include <QLineEdit>
 
 #include <memory>
@@ -49,6 +49,20 @@ private slots:
     void slotReadData();
 };
 
+class NetworkTCP: public Network
+{
+    Q_OBJECT
+public:
+    NetworkTCP(QHostAddress addr_serv, uint16_t port_serv);
+    ~NetworkTCP() override;
+    void send(QString msg) override;
+private:
+    std::unique_ptr<QTcpSocket> tcp;
+    QHostAddress addr_server;
+    uint16_t port_server;
+private slots:
+    void slotReadData();
+};
 
 class NetworkSettingsWidget: public QWidget
 {
